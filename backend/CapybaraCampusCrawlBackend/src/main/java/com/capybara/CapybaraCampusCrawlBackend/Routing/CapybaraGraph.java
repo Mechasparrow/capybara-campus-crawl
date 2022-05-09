@@ -8,4 +8,10 @@ public class CapybaraGraph extends SimpleDirectedWeightedGraph<Long, CapybaraGra
 		super(edgeClass);
 	}
 
+	@Override
+	public double getEdgeWeight(CapybaraGraphEdge e) {
+		// TODO Auto-generated method stub
+		return e.distance;
+	}
+
 }
