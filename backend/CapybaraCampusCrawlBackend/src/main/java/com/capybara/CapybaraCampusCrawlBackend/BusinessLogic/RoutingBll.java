@@ -4,7 +4,10 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
+import org.apache.commons.lang3.tuple.MutablePair;
+import org.apache.commons.lang3.tuple.Pair;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
@@ -62,35 +65,58 @@ public class RoutingBll {
          }
     }
 	
+    private List<Pair<GraphNode, GraphNode>> buildUpRoutingPairs(GraphNode startingNode, List<PitstopConstraint> intermediatePitstops, GraphNode endingNode){
+    	List<GraphNode> intermediateNodes = intermediatePitstops.stream()
+    			.map(pitstopConstraint -> pitstopConstraint.getLocation())
+    			.map(location -> location.getBuildingId())
+    			.map(buildingId -> buildingBll.fetchBuildingGraphNode(buildingId))
+    			.collect(Collectors.toList());
+    	
+    	List<GraphNode> routingNodes = new ArrayList<>(intermediateNodes);
+		routingNodes.add(0, startingNode);
+		routingNodes.add(endingNode);
+    	
+    	List<Pair<GraphNode,GraphNode>> routingPairs = new ArrayList<>();
+		GraphNode previousNode = routingNodes.get(0);
+			
+		for (int i = 1; i < routingNodes.size(); i++) {
+			GraphNode currentNode = routingNodes.get(i);
+			
+			MutablePair<GraphNode, GraphNode> routingPair = new MutablePair<>();
+			routingPair.setLeft(previousNode);
+			routingPair.setRight(currentNode);
+			
+			routingPairs.add(routingPair);
+			
+			previousNode = currentNode;
+		}
+		
+		return routingPairs;
+    }
+    
 	public List<Point> fetchRoute(RouteRequest routeRequest){
 		RouteRequestConstraints constraints = routeRequest.getConstraints();
 		LogConstraints(constraints);
 
-		List<PitstopConstraint> pitstopConstraints = constraints.getPitstops();
-		List<Location> pitstopConstraintLocations = new ArrayList<Location>();
-
-		// System.out.println(pitstopConstraints.size());
-		for(int i = 0; i < pitstopConstraints.size(); i++){
-			pitstopConstraintLocations.add(pitstopConstraints.get(i).getLocation());
-			System.out.println(pitstopConstraintLocations.get(i));
-		}
+    	GraphNode graphStartingNode = buildingBll.fetchBuildingGraphNode(routeRequest.getFromLocation().getBuildingId());
+		GraphNode graphFinalNode = buildingBll.fetchBuildingGraphNode(routeRequest.getToLocation().getBuildingId());
 		
+		//determine routing pairs
+		List<Pair<GraphNode,GraphNode>> routingPairs = buildUpRoutingPairs(graphStartingNode, constraints.getPitstops(), graphFinalNode);
+				
 		List<Point> points = new ArrayList<Point>();
 		
-		BigDecimal buildingIdFrom = routeRequest.getFromLocation().getBuildingId();
-    	BigDecimal buildingIdTo = routeRequest.getToLocation().getBuildingId();
-    	
-    	GraphNode graphNodeA = buildingBll.fetchBuildingGraphNode(buildingIdFrom);
-		GraphNode graphNodeB = buildingBll.fetchBuildingGraphNode(buildingIdTo);;
-		
-		try {
-			boolean preferIndoors = constraints.getPreferIndoors();
-			points = routingDao.ComputeRoute(graphNodeA.getNodeID(), graphNodeB.getNodeID(), preferIndoors);
-		} catch (Exception e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
+		for (Pair<GraphNode, GraphNode> routingPair : routingPairs) {
+			try {
+				boolean preferIndoors = constraints.getPreferIndoors();
+				List<Point> routingPoints = routingDao.ComputeRoute(routingPair.getLeft().getNodeID(), routingPair.getRight().getNodeID(), preferIndoors);
+				points.addAll(routingPoints);
+			} catch (Exception e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
 		}
-		
+				
 		return points;
 	}
 	
@@ -102,9 +128,7 @@ public class RoutingBll {
 		
 		Location toLocation = new Location();
 		toLocation.setBuildingId(buildingRouteRequest.getToBuilding().getBuildingId());
-		
-		
-		
+				
 		RouteRequestConstraints nullConstraints = new RouteRequestConstraints();
 		nullConstraints.setAvoidCrowds(false);
 		nullConstraints.setPreferIndoors(false);
